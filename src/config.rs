@@ -11,6 +11,7 @@ pub struct Config {
 
 pub struct DomainConfig {
     hostname: String,
+    cname: Option<String>,
     csr_file: String,
     dns_provider: DnsProvider,
 }
@@ -35,6 +36,7 @@ struct ConfigToml {
 
 #[derive(serde::Deserialize)]
 struct DomainConfigToml {
+    cname: Option<String>,
     csr_file: String,
     dns_provider: String,
 }
@@ -82,6 +84,7 @@ impl Config {
             .map(|(hostname, cfg)| {
                 Ok(DomainConfig {
                     hostname,
+                    cname: cfg.cname,
                     csr_file: cfg.csr_file,
                     dns_provider: DnsProvider::from_str(&cfg.dns_provider)?,
                 })

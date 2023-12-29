@@ -1,0 +1,51 @@
+[package]
+name = "acme-client-route53"
+version = "0.1.0"
+authors = ["Hanabusa Masahiro"]
+edition = "2021"
+description = "A simple ACME client using AWS Route53 or Lightsail DNS"
+rust-version = "1.69.0"
+readme = "README.md"
+repository = "https://github.com/hanabu/acme-client-route53"
+license = "MIT"
+keywords = ["acme", "letsencrypt"]
+categories = ["config","command-line-utilities", "web-programming"]
+exclude = [".*", "acme.toml"]
+default-run = "acme-client-route53"
+
+[features]
+default = ["lambda"]
+dns-lightsail = []
+dns-route53 = []
+lambda = ["dep:lambda_runtime", "dep:serde_json"]
+
+# Use Rustls as TLS implementation, instead of system openssl
+rustls = ["instant-acme/hyper-rustls"]
+
+[lib]
+path = "src/lib.rs" 
+
+# Binary running on localhost
+[[bin]]
+name = "acme-client-route53"
+path = "src/bin/main.rs"
+
+# Binary running on AWS Lambda
+[[bin]]
+name = "bootstrap"
+path = "src/bin/lambda-bootstrap.rs"
+required-features = ["lambda"]
+
+[dependencies]
+clap = { version="4", default-features=false, features=["std","derive","help","usage"]}
+hickory-resolver = { version="0.24" }
+hyper = { version="0.14", features=["client","http1"] }
+hyper-tls = { version="0.5" }
+instant-acme = { version="0.4.1", default-features=false }
+# Update to >=0.9, after aws-sdk and instant-acme will migrate to hyper-v1
+lambda_runtime = { version="0.8", optional=true }
+serde = { version="1", features=["derive"] }
+serde_json = { version="1", optional=true }
+thiserror = "1"
+toml = "0.8"
+tokio = { version="1", default-features=false, features=["macros", "rt-multi-thread"] }

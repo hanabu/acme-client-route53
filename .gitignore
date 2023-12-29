@@ -1,0 +1,10 @@
+*~
+*.bak
+*.swp
+.env
+*.zip
+acme.toml
+target/
+target_lambda*/
+vendor/
+

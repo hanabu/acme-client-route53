@@ -1,17 +1,17 @@
 //! Configration in TOML format
 //!
-use hyper::client::connect::dns;
+
+use std::collections::HashMap;
 
 use crate::Error;
 
 pub struct Config {
     account: instant_acme::Account,
-    domains: Vec<DomainConfig>,
+    cname: std::collections::HashMap<String, String>,
+    cert_requests: Vec<CertReqConfig>,
 }
 
-pub struct DomainConfig {
-    hostname: String,
-    cname: Option<String>,
+pub struct CertReqConfig {
     csr_file: String,
     dns_provider: DnsProvider,
 }
@@ -31,11 +31,13 @@ struct NewConfigToml {
 struct ConfigToml {
     #[serde(rename = "account")]
     credential: instant_acme::AccountCredentials,
-    domains: std::collections::HashMap<String, DomainConfigToml>,
+    #[serde(default)]
+    cname: std::collections::HashMap<String, String>,
+    certificate_requests: Vec<CertReqConfigToml>,
 }
 
 #[derive(serde::Deserialize)]
-struct DomainConfigToml {
+struct CertReqConfigToml {
     cname: Option<String>,
     csr_file: String,
     dns_provider: String,
@@ -69,7 +71,8 @@ impl Config {
         // Parse config toml
         let ConfigToml {
             credential,
-            domains,
+            cname,
+            certificate_requests,
         } = toml::from_str::<ConfigToml>(cfg_toml_str)?;
 
         // Load Account from credentials
@@ -79,29 +82,33 @@ impl Config {
         )
         .await?;
 
-        let domains = domains
+        let cert_requests = certificate_requests
             .into_iter()
-            .map(|(hostname, cfg)| {
-                Ok(DomainConfig {
-                    hostname,
-                    cname: cfg.cname,
-                    csr_file: cfg.csr_file,
-                    dns_provider: DnsProvider::from_str(&cfg.dns_provider)?,
+            .map(|req| {
+                Ok(CertReqConfig {
+                    csr_file: req.csr_file,
+                    dns_provider: DnsProvider::from_str(&req.dns_provider)?,
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
-        Ok(Self { account, domains })
+        Ok(Self {
+            account,
+            cname,
+            cert_requests,
+        })
     }
 
     pub fn account<'a>(&'a self) -> &'a instant_acme::Account {
         &self.account
     }
 
-    pub fn domains<'a>(&'a self) -> impl Iterator<Item = &'a DomainConfig> {
-        self.domains.iter()
+    pub fn certificate_requests<'a>(&'a self) -> impl Iterator<Item = &'a CertReqConfig> {
+        self.cert_requests.iter()
     }
 }
+
+impl CertReqConfig {}
 
 impl std::str::FromStr for DnsProvider {
     type Err = crate::Error;

@@ -30,8 +30,8 @@ pub async fn issue_certificates(config: &Config) -> Result<(), Error> {
     let aws_config = aws_config_from_env().await;
 
     // check if the domains are managed by AWS?
-    for domain_cfg in config.domains() {
-        //        let txt_record = if let Some(cname) = domain_cfg.
+    for req in config.certificate_requests() {
+        //let csr = CertRequest::from_pem_file()
     }
     Ok(())
 }

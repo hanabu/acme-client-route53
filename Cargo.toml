@@ -43,7 +43,7 @@ aws-sdk-lightsail = { version="1", default-features=false, optional=true }
 aws-sdk-route53 = { version="1", default-features=false, optional=true }
 aws-sdk-s3 = { version="1", default-features=false }
 clap = { version="4", default-features=false, features=["std","derive","help","usage"]}
-hickory-resolver = { version="0.24" }
+# hickory-resolver = { version="0.24" }
 hyper = { version="0.14", features=["client","http1"] }
 hyper-tls = { version="0.5" }
 instant-acme = { version="0.4.1", default-features=false }
@@ -54,3 +54,4 @@ serde_json = { version="1", optional=true }
 thiserror = "1"
 toml = "0.8"
 tokio = { version="1", default-features=false, features=["macros", "rt-multi-thread"] }
+x509-parser = { version="0.15" }

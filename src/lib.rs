@@ -1,11 +1,13 @@
 mod account;
 mod config;
 mod csr;
+mod dns;
 mod http_client;
 
 pub use account::new_account;
 pub use config::Config;
 pub use csr::CertRequest;
+pub use dns::{DnsProvider, DnsZone};
 use http_client::{aws_config_from_env, HyperTlsClient};
 
 #[derive(thiserror::Error, Debug)]

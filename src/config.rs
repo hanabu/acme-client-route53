@@ -13,12 +13,7 @@ pub struct Config {
 
 pub struct CertReqConfig {
     csr_file: String,
-    dns_provider: DnsProvider,
-}
-
-pub enum DnsProvider {
-    AwsRoute53,
-    AwsLightsail,
+    dns_provider: crate::DnsProvider,
 }
 
 #[derive(serde::Serialize)]
@@ -87,7 +82,7 @@ impl Config {
             .map(|req| {
                 Ok(CertReqConfig {
                     csr_file: req.csr_file,
-                    dns_provider: DnsProvider::from_str(&req.dns_provider)?,
+                    dns_provider: crate::DnsProvider::from_str(&req.dns_provider)?,
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -109,14 +104,3 @@ impl Config {
 }
 
 impl CertReqConfig {}
-
-impl std::str::FromStr for DnsProvider {
-    type Err = crate::Error;
-    fn from_str(dns_provider_str: &str) -> Result<Self, Self::Err> {
-        match dns_provider_str.to_ascii_lowercase().as_str() {
-            "route53" => Ok(Self::AwsRoute53),
-            "lightsail" => Ok(Self::AwsLightsail),
-            _ => Err(Error::UnknownDnsProvider(dns_provider_str.to_string())),
-        }
-    }
-}

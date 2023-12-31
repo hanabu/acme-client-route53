@@ -1,5 +1,5 @@
 //! Certificate signing request / PKCS#10 defined in RFC2986
-
+use crate::Error;
 use x509_parser::certification_request;
 
 pub struct CertRequest {
@@ -28,6 +28,65 @@ impl CertRequest {
     pub fn subjects<'a>(&'a self) -> impl Iterator<Item = &'a str> {
         std::iter::once(self.subject.as_str())
             .chain(self.alt_names.iter().map(|subj| subj.as_str()))
+    }
+
+    pub async fn issue_certificate(
+        &self,
+        config: &crate::Config,
+        dns_zones: &crate::AllDnsZones,
+    ) -> Result<(), Error> {
+        let validate_hostnames = self
+            .subjects()
+            .map(|hostname| instant_acme::Identifier::Dns(hostname.to_string()))
+            .collect::<Vec<_>>();
+
+        let mut order = config
+            .account()
+            .new_order(&instant_acme::NewOrder {
+                identifiers: &validate_hostnames,
+            })
+            .await?;
+
+        let authorizations = order.authorizations().await?;
+
+        // Collect ACME challenges need to be verified
+        let challenges = authorizations
+            .iter()
+            .filter_map(|auth| {
+                use instant_acme::AuthorizationStatus::{Expired, Pending};
+                use instant_acme::ChallengeType::Dns01;
+                match auth.status {
+                    Pending => {
+                        // challenge & authorize
+                        let dns_challenge = auth.challenges.iter().find(|c| c.r#type == Dns01);
+                        if let Some(dns_challenge) = dns_challenge {
+                            // DNS01 challenge
+                            let hostname = match &auth.identifier {
+                                instant_acme::Identifier::Dns(hostname) => hostname.as_str(),
+                            };
+                            // Retrive TXT record value
+                            let key_auth = order.key_authorization(dns_challenge);
+                            Some(Ok((hostname, key_auth.dns_value())))
+                        } else {
+                            // Oops, No DNS challenge supported in the ACME server?
+                            Some(Err(Error::DnsChallengeNotSupported))
+                        }
+                    }
+                    // Valid, Invalid, Revoked, Expired
+                    _ => None,
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for (hostname, txt_value) in challenges {
+            let challenge_record = format!("_acme-challenge.{}", hostname);
+            let canonical_challenge_record = config.canonical_host(&challenge_record);
+
+            dns_zones
+                .write_txt_record(canonical_challenge_record, &txt_value)
+                .await?;
+        }
+        todo!()
     }
 }
 

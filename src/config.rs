@@ -11,9 +11,9 @@ pub struct Config {
     cert_requests: Vec<CertReqConfig>,
 }
 
+#[derive(serde::Deserialize)]
 pub struct CertReqConfig {
     csr_file: String,
-    dns_provider: crate::DnsProvider,
 }
 
 #[derive(serde::Serialize)]
@@ -28,14 +28,7 @@ struct ConfigToml {
     credential: instant_acme::AccountCredentials,
     #[serde(default)]
     cname: std::collections::HashMap<String, String>,
-    certificate_requests: Vec<CertReqConfigToml>,
-}
-
-#[derive(serde::Deserialize)]
-struct CertReqConfigToml {
-    cname: Option<String>,
-    csr_file: String,
-    dns_provider: String,
+    certificate_requests: Vec<CertReqConfig>,
 }
 
 impl Config {
@@ -61,8 +54,6 @@ impl Config {
     }
 
     pub async fn from_str(cfg_toml_str: &str) -> Result<Self, Error> {
-        use std::str::FromStr;
-
         // Parse config toml
         let ConfigToml {
             credential,
@@ -77,20 +68,10 @@ impl Config {
         )
         .await?;
 
-        let cert_requests = certificate_requests
-            .into_iter()
-            .map(|req| {
-                Ok(CertReqConfig {
-                    csr_file: req.csr_file,
-                    dns_provider: crate::DnsProvider::from_str(&req.dns_provider)?,
-                })
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
-
         Ok(Self {
             account,
             cname,
-            cert_requests,
+            cert_requests: certificate_requests,
         })
     }
 
@@ -101,6 +82,18 @@ impl Config {
     pub fn certificate_requests<'a>(&'a self) -> impl Iterator<Item = &'a CertReqConfig> {
         self.cert_requests.iter()
     }
+
+    pub fn canonical_host<'a: 'c, 'b: 'c, 'c>(&'a self, hostname: &'b str) -> &'c str {
+        if let Some(cname) = self.cname.get(hostname) {
+            cname.as_str()
+        } else {
+            hostname
+        }
+    }
 }
 
-impl CertReqConfig {}
+impl CertReqConfig {
+    pub fn csr_file_name<'a>(&'a self) -> &'a str {
+        self.csr_file.as_str()
+    }
+}

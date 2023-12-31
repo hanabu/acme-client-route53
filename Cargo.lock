@@ -12,6 +12,7 @@ dependencies = [
  "aws-sdk-s3",
  "aws-smithy-runtime",
  "clap",
+ "futures",
  "hyper",
  "hyper-tls",
  "instant-acme",

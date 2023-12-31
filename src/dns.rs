@@ -1,48 +1,120 @@
 use crate::Error;
 
-pub enum DnsProvider {
-    AwsLightsail,
-    AwsRoute53,
+#[derive(Clone, Debug)]
+pub struct AwsClient {
+    lightsail_client: aws_sdk_lightsail::Client,
+    route53_client: aws_sdk_route53::Client,
 }
 
-impl DnsProvider {
-    pub async fn list_hosted_zones(
-        &self,
-        aws_config: &aws_config::SdkConfig,
-    ) -> Result<Vec<DnsZone>, Error> {
-        match self {
-            &Self::AwsLightsail => Self::list_lightsail_zones(aws_config).await,
-            &Self::AwsRoute53 => Self::list_route53_zones(aws_config).await,
+impl AwsClient {
+    pub fn new(aws_sdk_config: &aws_config::SdkConfig) -> Self {
+        Self {
+            lightsail_client: aws_sdk_lightsail::Client::new(aws_sdk_config),
+            route53_client: aws_sdk_route53::Client::new(aws_sdk_config),
         }
-    }
-
-    pub async fn list_lightsail_zones(
-        aws_config: &aws_config::SdkConfig,
-    ) -> Result<Vec<DnsZone>, Error> {
-        todo!()
-    }
-    pub async fn list_route53_zones(
-        aws_config: &aws_config::SdkConfig,
-    ) -> Result<Vec<DnsZone>, Error> {
-        todo!()
     }
 }
 
-impl std::str::FromStr for DnsProvider {
-    type Err = crate::Error;
-    fn from_str(dns_provider_str: &str) -> Result<Self, Self::Err> {
-        match dns_provider_str.to_ascii_lowercase().as_str() {
-            "route53" => Ok(Self::AwsRoute53),
-            "lightsail" => Ok(Self::AwsLightsail),
-            _ => Err(Error::UnknownDnsProvider(dns_provider_str.to_string())),
-        }
+pub struct AllDnsZones {
+    dns_zones: Vec<DnsZone>,
+    aws_client: AwsClient,
+}
+
+impl AllDnsZones {
+    pub async fn load(aws_clinet: &AwsClient) -> Result<Self, Error> {
+        let lightsail_fut = Self::list_lightsail_zones(&aws_clinet.lightsail_client);
+        let route53_fut = Self::list_route53_zones(&aws_clinet.route53_client);
+
+        // concurrent execution of lightsail and route53
+        let (lightsail_zones, route53_zones) = futures::try_join!(lightsail_fut, route53_fut)?;
+
+        // Concat Lightsail DNS + Route53 zones
+        let mut all_zones = lightsail_zones;
+        all_zones.extend(route53_zones);
+
+        Ok(Self {
+            dns_zones: all_zones,
+            aws_client: aws_clinet.clone(),
+        })
+    }
+
+    pub fn find_zone<'a>(&'a self, hostname: &str) -> Option<&'a DnsZone> {
+        self.dns_zones
+            .iter()
+            .filter(|zone| zone.contains(hostname))
+            .max_by_key(|zone| zone.domain_name().len())
+    }
+
+    pub async fn write_txt_record(&self, record_name: &str, txt_value: &str) -> Result<(), Error> {
+        todo!()
+    }
+
+    /// List all Lightsail DNS zones that AWS IAM role can access
+    async fn list_lightsail_zones(
+        client: &aws_sdk_lightsail::Client,
+    ) -> Result<Vec<DnsZone>, Error> {
+        // Call Lightsail GetDomains API
+        let resp = client.get_domains().send().await?;
+        let domains = resp.domains();
+        // AWS SDK response -> DnsZone::Lightsail
+        let dns_zones = domains.iter().filter_map(|domain| {
+            domain.name().map(|domain_name| DnsZone::Lightsail {
+                domain_name: domain_name.to_ascii_lowercase(),
+            })
+        });
+
+        Ok(dns_zones.collect::<Vec<_>>())
+    }
+
+    /// List all Route53 hosted zones that AWS IAM role can access
+    async fn list_route53_zones(client: &aws_sdk_route53::Client) -> Result<Vec<DnsZone>, Error> {
+        // Call Route53 ListHostedZones API
+        let pagenator = client
+            .list_hosted_zones()
+            .into_paginator()
+            .send()
+            .try_collect()
+            .await?;
+        // AWS SDK response -> DnsZone::Route53
+        let dns_zones = pagenator
+            .into_iter()
+            .map(|page| page.hosted_zones)
+            .flatten()
+            .map(|zone| DnsZone::Route53 {
+                domain_name: zone.name,
+                hosted_zone_id: zone.id,
+            });
+
+        Ok(dns_zones.collect::<Vec<_>>())
     }
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum DnsZone {
-    Lightsail { domain_name: String },
-    Route53 { hosted_zone_id: String },
+    Lightsail {
+        domain_name: String,
+    },
+    Route53 {
+        domain_name: String,
+        hosted_zone_id: String,
+    },
 }
 
-impl DnsZone {}
+impl DnsZone {
+    pub fn domain_name<'a>(&'a self) -> &'a str {
+        match self {
+            Self::Lightsail { domain_name } => domain_name.as_str(),
+            Self::Route53 {
+                domain_name,
+                hosted_zone_id: _,
+            } => domain_name.as_str(),
+        }
+    }
+
+    /// Check if the hostname is in this zone
+    /// ToDo fix: if this domain has NS record, and hostname matches the NS record, it should be excluded
+    pub fn contains(&self, hostname: &str) -> bool {
+        let domain_name = self.domain_name();
+        hostname.ends_with(domain_name)
+    }
+}

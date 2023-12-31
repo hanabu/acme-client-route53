@@ -46,6 +46,7 @@ enum CliCommands {
 /// main() for generic environment
 #[tokio::main]
 async fn main() {
+    use acme_client_route53::*;
     use clap::Parser;
 
     let cli = Cli::parse();
@@ -62,7 +63,7 @@ async fn main() {
             if contacts.is_empty() {
                 panic!("You need at least one contact email address.");
             }
-            acme_client_route53::new_account(
+            new_account(
                 &cli.config_file,
                 &endpoint,
                 contacts.iter().map(|c| c.as_str()),
@@ -70,6 +71,9 @@ async fn main() {
             .await
             .unwrap();
         }
-        CliCommands::Update {} => {}
+        CliCommands::Update {} => {
+            let config = Config::from_file(&cli.config_file).await.unwrap();
+            issue_certificates(&config).await.unwrap();
+        }
     }
 }

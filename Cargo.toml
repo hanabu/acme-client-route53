@@ -15,8 +15,6 @@ default-run = "acme-client-route53"
 
 [features]
 default = ["lambda"]
-dns-lightsail = ["dep:aws-sdk-lightsail"]
-dns-route53 = ["dep:aws-sdk-route53"]
 lambda = ["dep:lambda_runtime", "dep:serde_json"]
 
 # Use Rustls as TLS implementation, instead of system openssl
@@ -39,10 +37,11 @@ required-features = ["lambda"]
 [dependencies]
 aws-config = { version="1", default-features=false, features=["behavior-version-latest", "rt-tokio"] }
 aws-smithy-runtime = { version="1", default-features=false, features=["client", "connector-hyper-0-14-x"] }
-aws-sdk-lightsail = { version="1", default-features=false, optional=true }
-aws-sdk-route53 = { version="1", default-features=false, optional=true }
+aws-sdk-lightsail = { version="1", default-features=false }
+aws-sdk-route53 = { version="1", default-features=false }
 aws-sdk-s3 = { version="1", default-features=false }
 clap = { version="4", default-features=false, features=["std","derive","help","usage"]}
+futures = { version="0.3" }
 # hickory-resolver = { version="0.24" }
 hyper = { version="0.14", features=["client","http1"] }
 hyper-tls = { version="0.5" }

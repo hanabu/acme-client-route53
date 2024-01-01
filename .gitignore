@@ -1,10 +1,14 @@
 *~
 *.bak
+*.crt
+*.key
+*.pem
 *.swp
-.env
 *.zip
+.env
 acme.toml
 target/
 target_lambda*/
 vendor/
+/*.csr
 

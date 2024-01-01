@@ -32,6 +32,13 @@ pub enum Error {
         >,
     ),
     #[error(transparent)]
+    LightsailCreateEntryError(
+        #[from]
+        aws_sdk_lightsail::error::SdkError<
+            aws_sdk_lightsail::operation::create_domain_entry::CreateDomainEntryError,
+        >,
+    ),
+    #[error(transparent)]
     Route53ListHostedZonesError(
         #[from]
         aws_sdk_route53::error::SdkError<

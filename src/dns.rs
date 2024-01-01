@@ -46,7 +46,30 @@ impl AllDnsZones {
     }
 
     pub async fn write_txt_record(&self, record_name: &str, txt_value: &str) -> Result<(), Error> {
-        todo!()
+        match self.find_zone(record_name) {
+            Some(DnsZone::Lightsail { domain_name }) => {
+                DnsZone::write_txt_record_lightsail(
+                    &self.aws_client.lightsail_client,
+                    domain_name.as_str(),
+                    record_name,
+                    txt_value,
+                )
+                .await
+            }
+            Some(DnsZone::Route53 {
+                domain_name: _,
+                hosted_zone_id,
+            }) => {
+                DnsZone::write_txt_record_route53(
+                    &self.aws_client.route53_client,
+                    hosted_zone_id.as_str(),
+                    record_name,
+                    txt_value,
+                )
+                .await
+            }
+            None => Err(Error::NoDnsZone(record_name.to_string())),
+        }
     }
 
     /// List all Lightsail DNS zones that AWS IAM role can access
@@ -116,5 +139,36 @@ impl DnsZone {
     pub fn contains(&self, hostname: &str) -> bool {
         let domain_name = self.domain_name();
         hostname.ends_with(domain_name)
+    }
+
+    async fn write_txt_record_lightsail(
+        client: &aws_sdk_lightsail::Client,
+        domain_name: &str,
+        record_name: &str,
+        txt_value: &str,
+    ) -> Result<(), Error> {
+        let entry = aws_sdk_lightsail::types::DomainEntry::builder()
+            .name(record_name)
+            .r#type("TXT")
+            .target(format!("\"{}\"",txt_value))
+            .build();
+
+        let _resp = client
+            .create_domain_entry()
+            .domain_name(domain_name)
+            .domain_entry(entry)
+            .send()
+            .await?;
+
+        Ok(())
+    }
+
+    async fn write_txt_record_route53(
+        client: &aws_sdk_route53::Client,
+        hosted_zone_id: &str,
+        record_name: &str,
+        txt_value: &str,
+    ) -> Result<(), Error> {
+        todo!()
     }
 }

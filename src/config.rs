@@ -1,8 +1,5 @@
 //! Configration in TOML format
 //!
-
-use std::collections::HashMap;
-
 use crate::Error;
 
 pub struct Config {

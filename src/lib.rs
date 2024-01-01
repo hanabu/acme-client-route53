@@ -1,12 +1,14 @@
 mod account;
+mod acme;
 mod config;
 mod csr;
 mod dns;
 mod http_client;
 
 pub use account::new_account;
-pub use config::Config;
-pub use csr::CertRequest;
+pub use acme::AcmeOrder;
+pub use config::{CertReqConfig, Config};
+pub use csr::X509Csr;
 pub use dns::{AllDnsZones, AwsClient, DnsZone};
 use http_client::{aws_config_from_env, HyperTlsClient};
 
@@ -45,37 +47,21 @@ pub enum Error {
 }
 
 pub async fn issue_certificates(config: &Config) -> Result<(), Error> {
-    use futures::stream::StreamExt;
+    //use futures::stream::StreamExt;
 
-    let aws_sdk_config = aws_config_from_env().await;
+    // DNS is global resource, end points are located at us-east-1
+    let aws_sdk_config = aws_config_from_env("us-east-1").await;
     let aws_client = AwsClient::new(&aws_sdk_config);
 
     let zones = AllDnsZones::load(&aws_client).await?;
 
-    // Read All CSR files
-    let csrs = config
-        .certificate_requests()
-        .map(|req| CertRequest::from_pem_file(req.csr_file_name()))
-        .collect::<Result<Vec<_>, _>>()?;
+    for crt_req in config.certificate_requests() {
+        let order = AcmeOrder::new(config, &crt_req)?;
 
-    // check if the domains are managed by AWS, then collect zones
-    let mut host_zones = std::collections::HashMap::<&str, (&str, &DnsZone)>::new();
-    for csr in &csrs {
-        for hostname in csr.subjects() {
-            let canonical_host = config.canonical_host(hostname);
-            let zone = zones.find_zone(canonical_host);
-            if let Some(zone) = zone {
-                host_zones.insert(hostname, (canonical_host, zone));
-            } else {
-                return Err(Error::NoDnsZone(canonical_host.to_string()));
-            }
-        }
+        let order = order.load_and_check_csr(&zones)?;
+
+        order.request_certificate(&zones).await?;
     }
-
-    csrs.iter().map(|csr| async {
-        // order validation to ACME server
-        csr.issue_certificate(config, &zones)
-    });
 
     Ok(())
 }

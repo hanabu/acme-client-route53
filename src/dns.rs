@@ -45,12 +45,16 @@ impl AllDnsZones {
             .max_by_key(|zone| zone.domain_name().len())
     }
 
-    pub async fn write_txt_record(&self, record_name: &str, txt_value: &str) -> Result<(), Error> {
+    pub async fn update_txt_record(&self, record_name: &str, txt_value: &str) -> Result<(), Error> {
         match self.find_zone(record_name) {
-            Some(DnsZone::Lightsail { domain_name }) => {
-                DnsZone::write_txt_record_lightsail(
+            Some(DnsZone::Lightsail {
+                domain_name,
+                txt_record_ids,
+            }) => {
+                DnsZone::update_txt_lightsail(
                     &self.aws_client.lightsail_client,
                     domain_name.as_str(),
+                    txt_record_ids,
                     record_name,
                     txt_value,
                 )
@@ -60,7 +64,7 @@ impl AllDnsZones {
                 domain_name: _,
                 hosted_zone_id,
             }) => {
-                DnsZone::write_txt_record_route53(
+                DnsZone::update_txt_route53(
                     &self.aws_client.route53_client,
                     hosted_zone_id.as_str(),
                     record_name,
@@ -72,6 +76,35 @@ impl AllDnsZones {
         }
     }
 
+    pub async fn wait_for_update(
+        record_name: &str,
+        expected_txt_value: &str,
+        timeout_sec: u32,
+    ) -> Result<(), Error> {
+        let resolver = hickory_resolver::AsyncResolver::tokio_from_system_conf()?;
+
+        for _retry in 0..=(timeout_sec / 10) {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            println!("lookup {}", record_name);
+            resolver.clear_cache();
+            let records = resolver.txt_lookup(record_name).await;
+            println!("records {:?}", records);
+            if let Ok(records) = records {
+                for txt_record in records.iter() {
+                    for txt_data in txt_record.iter() {
+                        let txt_str = std::str::from_utf8(txt_data);
+                        println!("TXT value: {:?}", txt_str);
+                        if txt_str == Ok(expected_txt_value) {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(Error::DnsUpdateTimeout)
+    }
+
     /// List all Lightsail DNS zones that AWS IAM role can access
     async fn list_lightsail_zones(
         client: &aws_sdk_lightsail::Client,
@@ -81,8 +114,28 @@ impl AllDnsZones {
         let domains = resp.domains();
         // AWS SDK response -> DnsZone::Lightsail
         let dns_zones = domains.iter().filter_map(|domain| {
-            domain.name().map(|domain_name| DnsZone::Lightsail {
-                domain_name: domain_name.to_ascii_lowercase(),
+            domain.name().map(|domain_name| {
+                // Collect entry-ID mapping
+                let txt_record_ids = domain
+                    .domain_entries()
+                    .into_iter()
+                    .filter_map(|entry| {
+                        if let (Some(name), Some(id)) = (entry.name(), entry.id()) {
+                            if entry.r#type.as_deref() == Some("TXT") {
+                                Some((name.to_ascii_lowercase(), id.to_string()))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<std::collections::HashMap<_, _>>();
+
+                DnsZone::Lightsail {
+                    domain_name: domain_name.to_ascii_lowercase(),
+                    txt_record_ids,
+                }
             })
         });
 
@@ -116,6 +169,7 @@ impl AllDnsZones {
 pub enum DnsZone {
     Lightsail {
         domain_name: String,
+        txt_record_ids: std::collections::HashMap<String, String>,
     },
     Route53 {
         domain_name: String,
@@ -126,7 +180,10 @@ pub enum DnsZone {
 impl DnsZone {
     pub fn domain_name<'a>(&'a self) -> &'a str {
         match self {
-            Self::Lightsail { domain_name } => domain_name.as_str(),
+            Self::Lightsail {
+                domain_name,
+                txt_record_ids: _,
+            } => domain_name.as_str(),
             Self::Route53 {
                 domain_name,
                 hosted_zone_id: _,
@@ -141,29 +198,40 @@ impl DnsZone {
         hostname.ends_with(domain_name)
     }
 
-    async fn write_txt_record_lightsail(
+    async fn update_txt_lightsail(
         client: &aws_sdk_lightsail::Client,
         domain_name: &str,
+        txt_record_ids: &std::collections::HashMap<String, String>,
         record_name: &str,
         txt_value: &str,
     ) -> Result<(), Error> {
         let entry = aws_sdk_lightsail::types::DomainEntry::builder()
             .name(record_name)
             .r#type("TXT")
-            .target(format!("\"{}\"",txt_value))
-            .build();
+            .target(format!("\"{}\"", txt_value));
 
-        let _resp = client
-            .create_domain_entry()
-            .domain_name(domain_name)
-            .domain_entry(entry)
-            .send()
-            .await?;
+        if let Some(entry_id) = txt_record_ids.get(record_name) {
+            // record_name entry already exists, update it.
+            let _resp = client
+                .update_domain_entry()
+                .domain_name(domain_name)
+                .domain_entry(entry.id(entry_id).build())
+                .send()
+                .await?;
+        } else {
+            // No entry exists, create new one
+            let _resp = client
+                .create_domain_entry()
+                .domain_name(domain_name)
+                .domain_entry(entry.build())
+                .send()
+                .await?;
+        }
 
         Ok(())
     }
 
-    async fn write_txt_record_route53(
+    async fn update_txt_route53(
         client: &aws_sdk_route53::Client,
         hosted_zone_id: &str,
         record_name: &str,

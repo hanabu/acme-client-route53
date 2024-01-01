@@ -42,7 +42,7 @@ aws-sdk-route53 = { version="1", default-features=false }
 aws-sdk-s3 = { version="1", default-features=false }
 clap = { version="4", default-features=false, features=["std","derive","help","usage"]}
 futures = { version="0.3" }
-# hickory-resolver = { version="0.24" }
+hickory-resolver = { version="0.24", features=["system-config", "tokio-runtime"] }
 hyper = { version="0.14", features=["client","http1"] }
 hyper-tls = { version="0.5" }
 instant-acme = { version="0.4.1", default-features=false }

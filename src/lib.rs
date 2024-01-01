@@ -39,18 +39,29 @@ pub enum Error {
         >,
     ),
     #[error(transparent)]
+    LightsailUpdateEntryError(
+        #[from]
+        aws_sdk_lightsail::error::SdkError<
+            aws_sdk_lightsail::operation::update_domain_entry::UpdateDomainEntryError,
+        >,
+    ),
+    #[error(transparent)]
     Route53ListHostedZonesError(
         #[from]
         aws_sdk_route53::error::SdkError<
             aws_sdk_route53::operation::list_hosted_zones::ListHostedZonesError,
         >,
     ),
+    #[error(transparent)]
+    DnsResolveError(#[from] hickory_resolver::error::ResolveError),
     #[error("Configuration file already exists")]
     ConfigExists,
     #[error("No DNS zone for {0}")]
     NoDnsZone(String),
     #[error("DNS01 challenge is not supported")]
     DnsChallengeNotSupported,
+    #[error("DNS update timeout")]
+    DnsUpdateTimeout,
 }
 
 pub async fn issue_certificates(config: &Config) -> Result<(), Error> {

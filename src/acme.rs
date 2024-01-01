@@ -95,9 +95,11 @@ impl<'a> AcmeOrder<'a, crate::csr::X509Csr> {
             let canonical_challenge_record = self.config.canonical_host(&challenge_record);
 
             dns_zones
-                .write_txt_record(canonical_challenge_record, &txt_value)
+                .update_txt_record(canonical_challenge_record, &txt_value)
                 .await?;
+            crate::AllDnsZones::wait_for_update(canonical_challenge_record, &txt_value, 60).await?;
         }
+
         todo!()
     }
 }

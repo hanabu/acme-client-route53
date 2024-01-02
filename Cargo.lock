@@ -11,6 +11,7 @@ dependencies = [
  "aws-sdk-route53",
  "aws-sdk-s3",
  "aws-smithy-runtime",
+ "base64 0.21.5",
  "clap",
  "futures",
  "hickory-resolver",
@@ -23,6 +24,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+ "url",
  "x509-parser",
 ]
 

@@ -4,13 +4,15 @@ mod config;
 mod csr;
 mod dns;
 mod http_client;
+mod output;
 
 pub use account::new_account;
-pub use acme::AcmeOrder;
+pub use acme::{AcmeIssuedCertificate, AcmeOrder, AcmeOrderBuilder};
 pub use config::{CertReqConfig, Config};
 pub use csr::X509Csr;
 pub use dns::{AllDnsZones, AwsClient, DnsZone};
 use http_client::{aws_config_from_env, HyperTlsClient};
+pub use output::write_crt;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -21,7 +23,9 @@ pub enum Error {
     #[error(transparent)]
     TomlError(#[from] toml::de::Error),
     #[error(transparent)]
-    PemParseError(#[from] x509_parser::nom::Err<x509_parser::error::PEMError>),
+    CrtPemParseError(#[from] x509_parser::error::PEMError),
+    #[error(transparent)]
+    CsrPemParseError(#[from] x509_parser::nom::Err<x509_parser::error::PEMError>),
     #[error(transparent)]
     CsrParseError(#[from] x509_parser::nom::Err<x509_parser::error::X509Error>),
     #[error(transparent)]
@@ -53,6 +57,10 @@ pub enum Error {
         >,
     ),
     #[error(transparent)]
+    S3PutObjectError(
+        #[from] aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::put_object::PutObjectError>,
+    ),
+    #[error(transparent)]
     DnsResolveError(#[from] hickory_resolver::error::ResolveError),
     #[error("Configuration file already exists")]
     ConfigExists,
@@ -66,23 +74,28 @@ pub enum Error {
     DnsUpdateTimeout,
     #[error("Certificate issue timeout")]
     CertificateIssueTimeout,
+    #[error("Invalid out_crt_file")]
+    InvalidOutCrtFile(String),
 }
 
 pub async fn issue_certificates(config: &Config) -> Result<(), Error> {
     //use futures::stream::StreamExt;
 
-    // DNS is global resource, end points are located at us-east-1
-    let aws_sdk_config = aws_config_from_env("us-east-1").await;
-    let aws_client = AwsClient::new(&aws_sdk_config);
+    // Default region config for S3 put
+    let aws_sdk_config = aws_config_from_env(None).await;
 
+    // DNS is global resource, end points are located at us-east-1
+    let aws_client = AwsClient::new(&aws_config_from_env("us-east-1").await);
     let zones = AllDnsZones::load(&aws_client).await?;
 
     for crt_req in config.certificate_requests() {
-        let order = AcmeOrder::new(config, &crt_req)?;
+        // Load & check request
+        let order = AcmeOrder::new(config, &crt_req)?.load_and_check_csr(&zones)?;
 
-        let order = order.load_and_check_csr(&zones)?;
+        // Request certificate to ACME server
+        let certificate = order.request_certificate(&zones).await?;
 
-        order.request_certificate(&zones).await?;
+        write_crt(crt_req.crt_file_name(), &certificate, &aws_sdk_config).await?;
     }
 
     Ok(())

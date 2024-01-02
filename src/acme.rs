@@ -1,36 +1,36 @@
 use crate::Error;
 
-pub struct AcmeOrder<'a, C = (), U = ()> {
+pub struct AcmeOrder<'a> {
     config: &'a crate::Config,
-    cert_cfg: &'a crate::CertReqConfig,
-    csr: C,     //crate::X509Csr,
-    crt_pem: U, // String
+    csr: crate::X509Csr,
 }
 
-impl<'a> AcmeOrder<'a, (), ()> {
+pub struct AcmeOrderBuilder<'a> {
+    config: &'a crate::Config,
+    cert_cfg: &'a crate::CertReqConfig,
+}
+
+impl<'a> AcmeOrder<'a> {
     pub fn new<'b: 'a>(
         config: &'b crate::Config,
         cert_cfg: &'b crate::CertReqConfig,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            config,
-            cert_cfg,
-            csr: (),
-            crt_pem: (),
-        })
+    ) -> Result<AcmeOrderBuilder<'a>, Error> {
+        Ok(AcmeOrderBuilder { config, cert_cfg })
     }
+}
 
+impl<'a> AcmeOrderBuilder<'a> {
     pub fn load_and_check_csr(
         &self,
         dns_zones: &crate::AllDnsZones,
-    ) -> Result<AcmeOrder<'a, crate::csr::X509Csr>, Error> {
+    ) -> Result<AcmeOrder<'a>, Error> {
         // Read CSR file
         let csr = crate::csr::X509Csr::from_pem_file(self.cert_cfg.csr_file_name())?;
 
         for hostname in csr.subjects() {
             let canonical_host = self.config.canonical_host(hostname);
             let zone = dns_zones.find_zone(canonical_host);
-            if let Some(zone) = zone {
+            if let Some(_zone) = zone {
                 // ok
             } else {
                 return Err(Error::NoDnsZone(canonical_host.to_string()));
@@ -39,18 +39,16 @@ impl<'a> AcmeOrder<'a, (), ()> {
 
         Ok(AcmeOrder {
             config: self.config,
-            cert_cfg: self.cert_cfg,
             csr,
-            crt_pem: (),
         })
     }
 }
 
-impl<'a> AcmeOrder<'a, crate::X509Csr, ()> {
+impl AcmeOrder<'_> {
     pub async fn request_certificate(
         &self,
         dns_zones: &crate::AllDnsZones,
-    ) -> Result<AcmeOrder<'a, (), String>, Error> {
+    ) -> Result<AcmeIssuedCertificate, Error> {
         let validate_hostnames = self
             .csr
             .subjects()
@@ -129,17 +127,46 @@ impl<'a> AcmeOrder<'a, crate::X509Csr, ()> {
         order.finalize(self.csr.der_bytes()).await?;
         for _retry in 0..12 {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            if let Some(crt_pem) = order.certificate().await? {
-                return Ok(AcmeOrder {
-                    config: self.config,
-                    cert_cfg: self.cert_cfg,
-                    csr: (),
-                    crt_pem,
-                });
+            if let Some(crt_pem_str) = order.certificate().await? {
+                let crt_pem = x509_parser::pem::Pem::iter_from_buffer(crt_pem_str.as_bytes())
+                    .collect::<Result<Vec<_>, x509_parser::error::PEMError>>()?;
+
+                return Ok(AcmeIssuedCertificate { crt_pem });
             }
         }
 
         // Timeout
         Err(Error::CertificateIssueTimeout)
+    }
+}
+
+pub struct AcmeIssuedCertificate {
+    crt_pem: Vec<x509_parser::pem::Pem>,
+}
+
+impl AcmeIssuedCertificate {
+    pub fn server_certificate_pem(&self) -> String {
+        Self::to_pem_string(&self.crt_pem[0])
+    }
+
+    pub fn issuer_certificate_pem(&self) -> String {
+        Self::to_pem_string(&self.crt_pem[1])
+    }
+
+    fn to_pem_string(pem: &x509_parser::pem::Pem) -> String {
+        use base64::engine::Engine;
+
+        // Base64 encode with 64char line wrap
+        let b64content = pem
+            .contents
+            .chunks(48)
+            .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes))
+            .collect::<Vec<String>>()
+            .join("\n");
+
+        format!(
+            "-----BEGIN {}-----\n{}\n-----END {}-----\n\n",
+            pem.label, b64content, pem.label
+        )
     }
 }

@@ -11,6 +11,7 @@ pub struct Config {
 #[derive(serde::Deserialize)]
 pub struct CertReqConfig {
     csr_file: String,
+    out_crt_file: String,
 }
 
 #[derive(serde::Serialize)]
@@ -37,7 +38,7 @@ impl Config {
         toml::to_string_pretty(&new_toml).unwrap()
     }
 
-    pub async fn from_file(config_file: &std::path::Path) -> Result<Self, Error> {
+    pub async fn from_file<P: AsRef<std::path::Path>>(config_file: P) -> Result<Self, Error> {
         use std::io::Read;
 
         // Read acme.toml file
@@ -92,5 +93,9 @@ impl Config {
 impl CertReqConfig {
     pub fn csr_file_name<'a>(&'a self) -> &'a str {
         self.csr_file.as_str()
+    }
+
+    pub fn crt_file_name<'a>(&'a self) -> &'a str {
+        &self.out_crt_file.as_str()
     }
 }

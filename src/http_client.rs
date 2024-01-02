@@ -35,9 +35,18 @@ pub async fn aws_config_from_env(
     let hyper_connector = hyper_tls::HttpsConnector::new();
     let hyper_client = HyperClientBuilder::new().build(hyper_connector);
 
-    aws_config::from_env()
-        .region(region)
-        .http_client(hyper_client)
-        .load()
-        .await
+    if region.region().await.is_some() {
+        // Specified region
+        aws_config::from_env()
+            .region(region)
+            .http_client(hyper_client)
+            .load()
+            .await
+    } else {
+        // default region
+        aws_config::from_env()
+            .http_client(hyper_client)
+            .load()
+            .await
+    }
 }

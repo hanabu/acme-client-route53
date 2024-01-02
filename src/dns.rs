@@ -230,7 +230,7 @@ impl DnsZone {
     }
 }
 
-pub(crate) struct DnsChange<'a> {
+pub struct DnsChange<'a> {
     record_name: &'a str,
     txt_value: &'a str,
     initial_wait: u32,

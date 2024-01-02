@@ -7,10 +7,12 @@ pub struct AwsClient {
 }
 
 impl AwsClient {
-    pub fn new(aws_sdk_config: &aws_config::SdkConfig) -> Self {
+    pub async fn new() -> Self {
+        // DNS is global resource, end points are located at us-east-1
+        let aws_sdk_config = crate::http_client::aws_config_from_env("us-east-1").await;
         Self {
-            lightsail_client: aws_sdk_lightsail::Client::new(aws_sdk_config),
-            route53_client: aws_sdk_route53::Client::new(aws_sdk_config),
+            lightsail_client: aws_sdk_lightsail::Client::new(&aws_sdk_config),
+            route53_client: aws_sdk_route53::Client::new(&aws_sdk_config),
         }
     }
 }

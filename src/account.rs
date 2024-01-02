@@ -29,7 +29,7 @@ pub async fn new_account(
         },
         endpoint,
         None,
-        crate::HyperTlsClient::new_boxed(),
+        crate::http_client::HyperTlsClient::new_boxed(),
     )
     .await?;
 

@@ -6,12 +6,12 @@ mod dns;
 mod http_client;
 mod output;
 
+// re-exports
 pub use account::new_account;
 pub use acme::{AcmeIssuedCertificate, AcmeOrder, AcmeOrderBuilder};
 pub use config::{CertReqConfig, Config};
 pub use csr::X509Csr;
 pub use dns::{AllDnsZones, AwsClient, DnsZone};
-use http_client::{aws_config_from_env, HyperTlsClient};
 pub use output::write_crt;
 
 #[derive(thiserror::Error, Debug)]
@@ -82,10 +82,10 @@ pub async fn issue_certificates(config: &Config) -> Result<(), Error> {
     //use futures::stream::StreamExt;
 
     // Default region config for S3 put
-    let aws_sdk_config = aws_config_from_env(None).await;
+    let aws_sdk_config = http_client::aws_config_from_env(None).await;
 
-    // DNS is global resource, end points are located at us-east-1
-    let aws_client = AwsClient::new(&aws_config_from_env("us-east-1").await);
+    // Load DNS records that current AWS credential can manage
+    let aws_client = AwsClient::new().await;
     let zones = AllDnsZones::load(&aws_client).await?;
 
     for crt_req in config.certificate_requests() {

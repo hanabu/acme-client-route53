@@ -62,7 +62,7 @@ impl Config {
         // Load Account from credentials
         let account = instant_acme::Account::from_credentials_and_http(
             credential,
-            crate::HyperTlsClient::new_boxed(),
+            crate::http_client::HyperTlsClient::new_boxed(),
         )
         .await?;
 

@@ -96,8 +96,9 @@ impl<'a> AcmeOrder<'a, crate::csr::X509Csr> {
 
             dns_zones
                 .update_txt_record(canonical_challenge_record, &txt_value)
+                .await?
+                .wait_for_propergation(60)
                 .await?;
-            crate::AllDnsZones::wait_for_update(canonical_challenge_record, &txt_value, 60).await?;
         }
 
         todo!()

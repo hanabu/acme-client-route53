@@ -45,64 +45,50 @@ impl AllDnsZones {
             .max_by_key(|zone| zone.domain_name().len())
     }
 
-    pub async fn update_txt_record(&self, record_name: &str, txt_value: &str) -> Result<(), Error> {
+    pub async fn update_txt_record<'a>(
+        &self,
+        record_name: &'a str,
+        txt_value: &'a str,
+    ) -> Result<DnsChange<'a>, Error> {
         match self.find_zone(record_name) {
             Some(DnsZone::Lightsail {
                 domain_name,
                 txt_record_ids,
             }) => {
-                DnsZone::update_txt_lightsail(
+                let initial_wait = DnsZone::update_txt_lightsail(
                     &self.aws_client.lightsail_client,
                     domain_name.as_str(),
                     txt_record_ids,
                     record_name,
                     txt_value,
                 )
-                .await
+                .await?;
+
+                Ok(DnsChange {
+                    record_name,
+                    txt_value,
+                    initial_wait,
+                })
             }
             Some(DnsZone::Route53 {
                 domain_name: _,
                 hosted_zone_id,
             }) => {
-                DnsZone::update_txt_route53(
+                let initial_wait = DnsZone::update_txt_route53(
                     &self.aws_client.route53_client,
                     hosted_zone_id.as_str(),
                     record_name,
                     txt_value,
                 )
-                .await
+                .await?;
+                Ok(DnsChange {
+                    record_name,
+                    txt_value,
+                    initial_wait,
+                })
             }
             None => Err(Error::NoDnsZone(record_name.to_string())),
         }
-    }
-
-    pub async fn wait_for_update(
-        record_name: &str,
-        expected_txt_value: &str,
-        timeout_sec: u32,
-    ) -> Result<(), Error> {
-        let resolver = hickory_resolver::AsyncResolver::tokio_from_system_conf()?;
-
-        for _retry in 0..=(timeout_sec / 10) {
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-            println!("lookup {}", record_name);
-            resolver.clear_cache();
-            let records = resolver.txt_lookup(record_name).await;
-            println!("records {:?}", records);
-            if let Ok(records) = records {
-                for txt_record in records.iter() {
-                    for txt_data in txt_record.iter() {
-                        let txt_str = std::str::from_utf8(txt_data);
-                        println!("TXT value: {:?}", txt_str);
-                        if txt_str == Ok(expected_txt_value) {
-                            return Ok(());
-                        }
-                    }
-                }
-            }
-        }
-
-        Err(Error::DnsUpdateTimeout)
     }
 
     /// List all Lightsail DNS zones that AWS IAM role can access
@@ -204,7 +190,7 @@ impl DnsZone {
         txt_record_ids: &std::collections::HashMap<String, String>,
         record_name: &str,
         txt_value: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<u32, Error> {
         let entry = aws_sdk_lightsail::types::DomainEntry::builder()
             .name(record_name)
             .r#type("TXT")
@@ -218,6 +204,8 @@ impl DnsZone {
                 .domain_entry(entry.id(entry_id).build())
                 .send()
                 .await?;
+
+            Ok(10)
         } else {
             // No entry exists, create new one
             let _resp = client
@@ -226,9 +214,10 @@ impl DnsZone {
                 .domain_entry(entry.build())
                 .send()
                 .await?;
+            // Lightsail DNS has long negatie cache TTL.
+            // To avoid NXDOMAIN caching, wait enough time after creation.
+            Ok(50)
         }
-
-        Ok(())
     }
 
     async fn update_txt_route53(
@@ -236,7 +225,48 @@ impl DnsZone {
         hosted_zone_id: &str,
         record_name: &str,
         txt_value: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<u32, Error> {
         todo!()
+    }
+}
+
+pub(crate) struct DnsChange<'a> {
+    record_name: &'a str,
+    txt_value: &'a str,
+    initial_wait: u32,
+}
+
+impl DnsChange<'_> {
+    pub async fn wait_for_propergation(&self, timeout_secs: u32) -> Result<bool, Error> {
+        const POLLING_INTERVAL_SECS: u32 = 10;
+
+        let resolver = hickory_resolver::AsyncResolver::tokio_from_system_conf()?;
+
+        if POLLING_INTERVAL_SECS < self.initial_wait {
+            let init_wait =
+                std::time::Duration::from_secs((self.initial_wait - POLLING_INTERVAL_SECS) as u64);
+            tokio::time::sleep(init_wait).await;
+        }
+
+        for _retry in 0..=(timeout_secs / POLLING_INTERVAL_SECS) {
+            tokio::time::sleep(std::time::Duration::from_secs(POLLING_INTERVAL_SECS as u64)).await;
+            println!("lookup {}", self.record_name);
+            resolver.clear_cache();
+            let records = resolver.txt_lookup(self.record_name).await;
+            println!("records {:?}", records);
+            if let Ok(records) = records {
+                for txt_record in records.iter() {
+                    for txt_data in txt_record.iter() {
+                        let txt_str = std::str::from_utf8(txt_data);
+                        println!("TXT value: {:?}", txt_str);
+                        if txt_str == Ok(self.txt_value) {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(Error::DnsUpdateTimeout)
     }
 }

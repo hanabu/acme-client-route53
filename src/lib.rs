@@ -57,6 +57,18 @@ pub enum Error {
         >,
     ),
     #[error(transparent)]
+    Route53ChangeRecordError(
+        #[from]
+        aws_sdk_route53::error::SdkError<
+            aws_sdk_route53::operation::change_resource_record_sets::ChangeResourceRecordSetsError,
+        >,
+    ),
+    #[error(transparent)]
+    Route53GetChangeError(
+        #[from]
+        aws_sdk_route53::error::SdkError<aws_sdk_route53::operation::get_change::GetChangeError>,
+    ),
+    #[error(transparent)]
     S3PutObjectError(
         #[from] aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::put_object::PutObjectError>,
     ),

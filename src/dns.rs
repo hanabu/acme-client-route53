@@ -47,11 +47,11 @@ impl AllDnsZones {
             .max_by_key(|zone| zone.domain_name().len())
     }
 
-    pub async fn update_txt_record<'a>(
-        &self,
-        record_name: &'a str,
-        txt_value: &'a str,
-    ) -> Result<DnsChange<'a>, Error> {
+    pub async fn update_txt_record<'a: 'c, 'b: 'c, 'c>(
+        &'a self,
+        record_name: &'b str,
+        txt_value: &'b str,
+    ) -> Result<DnsChange<'c>, Error> {
         match self.find_zone(record_name) {
             Some(DnsZone::Lightsail {
                 domain_name,
@@ -192,7 +192,7 @@ impl DnsZone {
         txt_record_ids: &std::collections::HashMap<String, String>,
         record_name: &str,
         txt_value: &str,
-    ) -> Result<u32, Error> {
+    ) -> Result<DnsChangeInitialWait<'static>, Error> {
         let entry = aws_sdk_lightsail::types::DomainEntry::builder()
             .name(record_name)
             .r#type("TXT")
@@ -207,7 +207,7 @@ impl DnsZone {
                 .send()
                 .await?;
 
-            Ok(10)
+            Ok(DnsChangeInitialWait::ConstTime(10))
         } else {
             // No entry exists, create new one
             let _resp = client
@@ -218,24 +218,64 @@ impl DnsZone {
                 .await?;
             // Lightsail DNS has long negatie cache TTL.
             // To avoid NXDOMAIN caching, wait enough time after creation.
-            Ok(50)
+            Ok(DnsChangeInitialWait::ConstTime(50))
         }
     }
 
-    async fn update_txt_route53(
-        client: &aws_sdk_route53::Client,
+    async fn update_txt_route53<'a>(
+        client: &'a aws_sdk_route53::Client,
         hosted_zone_id: &str,
         record_name: &str,
         txt_value: &str,
-    ) -> Result<u32, Error> {
-        todo!()
+    ) -> Result<DnsChangeInitialWait<'a>, Error> {
+        use aws_sdk_route53::types::{Change, ChangeAction, ChangeBatch};
+        use aws_sdk_route53::types::{ResourceRecord, ResourceRecordSet, RrType};
+
+        let record = ResourceRecordSet::builder()
+            .name(record_name)
+            .r#type(RrType::Txt)
+            .resource_records(ResourceRecord::builder().value(txt_value).build().unwrap())
+            .ttl(60)
+            .build()
+            .unwrap(); // unwrap() is safe when .name() and .type() were called
+
+        let change = Change::builder()
+            .action(ChangeAction::Upsert)
+            .resource_record_set(record)
+            .build()
+            .unwrap(); // unwrap() is safe when .action() was called
+
+        let changes = ChangeBatch::builder().changes(change).build().unwrap(); // unwrap() is safe when .changes() was called
+
+        // Send change request
+        let resp = client
+            .change_resource_record_sets()
+            .hosted_zone_id(hosted_zone_id)
+            .change_batch(changes)
+            .send()
+            .await?;
+
+        if let Some(change_info) = resp.change_info() {
+            Ok(DnsChangeInitialWait::Route53Status(
+                change_info.id().to_string(),
+                client,
+            ))
+        } else {
+            // Unexpected, wait 50 seconds before validate DNS records
+            Ok(DnsChangeInitialWait::ConstTime(50))
+        }
     }
 }
 
 pub struct DnsChange<'a> {
     record_name: &'a str,
     txt_value: &'a str,
-    initial_wait: u32,
+    initial_wait: DnsChangeInitialWait<'a>,
+}
+
+enum DnsChangeInitialWait<'a> {
+    ConstTime(u32),
+    Route53Status(String, &'a aws_sdk_route53::Client),
 }
 
 impl DnsChange<'_> {
@@ -244,13 +284,36 @@ impl DnsChange<'_> {
 
         let resolver = hickory_resolver::AsyncResolver::tokio_from_system_conf()?;
 
-        if POLLING_INTERVAL_SECS < self.initial_wait {
-            let init_wait =
-                std::time::Duration::from_secs((self.initial_wait - POLLING_INTERVAL_SECS) as u64);
-            tokio::time::sleep(init_wait).await;
+        let timeout = std::time::Duration::from_secs(timeout_secs as u64);
+        let wait_start = std::time::Instant::now();
+
+        match &self.initial_wait {
+            DnsChangeInitialWait::ConstTime(init_wait_secs) => {
+                if POLLING_INTERVAL_SECS < *init_wait_secs {
+                    let init_wait = std::time::Duration::from_secs(
+                        (*init_wait_secs - POLLING_INTERVAL_SECS) as u64,
+                    );
+                    tokio::time::sleep(init_wait).await;
+                }
+            }
+            DnsChangeInitialWait::Route53Status(change_id, client) => {
+                use aws_sdk_route53::types::ChangeStatus;
+                while wait_start.elapsed() < timeout {
+                    let resp = client.get_change().id(change_id).send().await?;
+                    if let Some(change_info) = resp.change_info() {
+                        if change_info.status() == &ChangeStatus::Insync {
+                            break;
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(
+                        POLLING_INTERVAL_SECS as u64,
+                    ))
+                    .await;
+                }
+            }
         }
 
-        for _retry in 0..=(timeout_secs / POLLING_INTERVAL_SECS) {
+        while wait_start.elapsed() < timeout {
             tokio::time::sleep(std::time::Duration::from_secs(POLLING_INTERVAL_SECS as u64)).await;
             println!("lookup {}", self.record_name);
             resolver.clear_cache();

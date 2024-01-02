@@ -1,12 +1,13 @@
 use crate::Error;
 
-pub struct AcmeOrder<'a, C = ()> {
+pub struct AcmeOrder<'a, C = (), U = ()> {
     config: &'a crate::Config,
     cert_cfg: &'a crate::CertReqConfig,
-    csr: C, //crate::csr::X509Csr,
+    csr: C,     //crate::X509Csr,
+    crt_pem: U, // String
 }
 
-impl<'a> AcmeOrder<'a, ()> {
+impl<'a> AcmeOrder<'a, (), ()> {
     pub fn new<'b: 'a>(
         config: &'b crate::Config,
         cert_cfg: &'b crate::CertReqConfig,
@@ -15,6 +16,7 @@ impl<'a> AcmeOrder<'a, ()> {
             config,
             cert_cfg,
             csr: (),
+            crt_pem: (),
         })
     }
 
@@ -39,12 +41,16 @@ impl<'a> AcmeOrder<'a, ()> {
             config: self.config,
             cert_cfg: self.cert_cfg,
             csr,
+            crt_pem: (),
         })
     }
 }
 
-impl<'a> AcmeOrder<'a, crate::csr::X509Csr> {
-    pub async fn request_certificate(&self, dns_zones: &crate::AllDnsZones) -> Result<Self, Error> {
+impl<'a> AcmeOrder<'a, crate::X509Csr, ()> {
+    pub async fn request_certificate(
+        &self,
+        dns_zones: &crate::AllDnsZones,
+    ) -> Result<AcmeOrder<'a, (), String>, Error> {
         let validate_hostnames = self
             .csr
             .subjects()
@@ -78,7 +84,11 @@ impl<'a> AcmeOrder<'a, crate::csr::X509Csr> {
                             };
                             // Retrive TXT record value
                             let key_auth = order.key_authorization(dns_challenge);
-                            Some(Ok((hostname, key_auth.dns_value())))
+                            Some(Ok((
+                                hostname,
+                                key_auth.dns_value(),
+                                dns_challenge.url.as_str(),
+                            )))
                         } else {
                             // Oops, No DNS challenge supported in the ACME server?
                             Some(Err(Error::DnsChallengeNotSupported))
@@ -90,17 +100,46 @@ impl<'a> AcmeOrder<'a, crate::csr::X509Csr> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        for (hostname, txt_value) in challenges {
+        for (hostname, txt_value, challenge_url) in challenges {
             let challenge_record = format!("_acme-challenge.{}", hostname);
             let canonical_challenge_record = self.config.canonical_host(&challenge_record);
 
             dns_zones
                 .update_txt_record(canonical_challenge_record, &txt_value)
                 .await?
-                .wait_for_propergation(60)
+                .wait_for_propergation(90)
                 .await?;
+
+            // DNS change has been propergated. Let ACME server to validate them.
+            order.set_challenge_ready(challenge_url).await?;
         }
 
-        todo!()
+        // Now, all challenge has validated.
+        match order.state().status {
+            instant_acme::OrderStatus::Ready
+            | instant_acme::OrderStatus::Valid
+            | instant_acme::OrderStatus::Processing => {}
+            _ => {
+                // Unexpected invalid status
+                return Err(Error::AcmeChallengeIncomplete);
+            }
+        }
+
+        // Issue certificate
+        order.finalize(self.csr.der_bytes()).await?;
+        for _retry in 0..12 {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            if let Some(crt_pem) = order.certificate().await? {
+                return Ok(AcmeOrder {
+                    config: self.config,
+                    cert_cfg: self.cert_cfg,
+                    csr: (),
+                    crt_pem,
+                });
+            }
+        }
+
+        // Timeout
+        Err(Error::CertificateIssueTimeout)
     }
 }

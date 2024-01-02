@@ -60,8 +60,12 @@ pub enum Error {
     NoDnsZone(String),
     #[error("DNS01 challenge is not supported")]
     DnsChallengeNotSupported,
+    #[error("ACME challenge did not complete unexpectedly")]
+    AcmeChallengeIncomplete,
     #[error("DNS update timeout")]
     DnsUpdateTimeout,
+    #[error("Certificate issue timeout")]
+    CertificateIssueTimeout,
 }
 
 pub async fn issue_certificates(config: &Config) -> Result<(), Error> {

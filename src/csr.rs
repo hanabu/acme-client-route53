@@ -1,6 +1,7 @@
 //! Certificate signing request / PKCS#10 defined in RFC2986
 use crate::Error;
 
+#[derive(Clone)]
 pub struct X509Csr {
     der_bytes: Vec<u8>,
     subject: String,

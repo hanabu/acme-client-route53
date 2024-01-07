@@ -91,7 +91,8 @@ pub enum Error {
 }
 
 pub async fn issue_certificates(config: &Config) -> Result<(), Error> {
-    //use futures::stream::StreamExt;
+    use futures::StreamExt;
+    const REQUEST_CONCURRENT: usize = 4;
 
     // Default region config for S3 put
     let aws_sdk_config = http_client::aws_config_from_env(None).await;
@@ -100,15 +101,29 @@ pub async fn issue_certificates(config: &Config) -> Result<(), Error> {
     let aws_client = AwsClient::new().await;
     let zones = AllDnsZones::load(&aws_client).await?;
 
-    for crt_req in config.certificate_requests() {
+    let fut = config.certificate_requests().map(|crt_req| async {
         // Load & check request
+        let crt_req = crt_req.clone();
         let order = AcmeOrder::new(config, &crt_req)?.load_and_check_csr(&zones)?;
 
         // Request certificate to ACME server
         let certificate = order.request_certificate(&zones).await?;
 
+        // Save certificate
         write_crt(crt_req.crt_file_name(), &certificate, &aws_sdk_config).await?;
-    }
 
-    Ok(())
+        Result::<(), Error>::Ok(())
+    });
+
+    // Request certificates concurrently
+    let stream = futures::stream::iter(fut).buffer_unordered(REQUEST_CONCURRENT);
+    let results = stream.collect::<Vec<_>>().await;
+
+    if let Some(e) = results.into_iter().find_map(|result| result.err()) {
+        // Returns first error
+        Err(e)
+    } else {
+        // no error
+        Ok(())
+    }
 }

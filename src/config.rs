@@ -8,10 +8,12 @@ pub struct Config {
     cert_requests: Vec<CertReqConfig>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct CertReqConfig {
     csr_file: String,
     out_crt_file: String,
+    #[serde(flatten)]
+    extra: std::collections::HashMap<String, toml::Value>,
 }
 
 #[derive(serde::Serialize)]
@@ -97,5 +99,12 @@ impl CertReqConfig {
 
     pub fn crt_file_name<'a>(&'a self) -> &'a str {
         &self.out_crt_file.as_str()
+    }
+
+    pub fn extra_config<'de, T: serde::Deserialize<'de>>(self) -> Result<T, Error> {
+        let extra = T::deserialize(serde::de::value::MapDeserializer::new(
+            self.extra.into_iter(),
+        ))?;
+        Ok(extra)
     }
 }

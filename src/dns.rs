@@ -145,7 +145,8 @@ impl AllDnsZones {
             .map(|page| page.hosted_zones)
             .flatten()
             .map(|zone| DnsZone::Route53 {
-                domain_name: zone.name,
+                // ListHostedZones returns zone name with '.' suffix, remove it.
+                domain_name: zone.name.trim_end_matches('.').to_ascii_lowercase(),
                 hosted_zone_id: zone.id,
             });
 
@@ -234,7 +235,12 @@ impl DnsZone {
         let record = ResourceRecordSet::builder()
             .name(record_name)
             .r#type(RrType::Txt)
-            .resource_records(ResourceRecord::builder().value(txt_value).build().unwrap())
+            .resource_records(
+                ResourceRecord::builder()
+                    .value(format!("\"{}\"", txt_value))
+                    .build()
+                    .unwrap(),
+            )
             .ttl(60)
             .build()
             .unwrap(); // unwrap() is safe when .name() and .type() were called

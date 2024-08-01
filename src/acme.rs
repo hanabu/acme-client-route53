@@ -113,13 +113,26 @@ impl AcmeOrder<'_> {
         }
 
         // Now, all challenge has validated.
-        match order.state().status {
-            instant_acme::OrderStatus::Ready
-            | instant_acme::OrderStatus::Valid
-            | instant_acme::OrderStatus::Processing => {}
-            _ => {
-                // Unexpected invalid status
-                return Err(Error::AcmeChallengeIncomplete);
+        for _retry in 0..3 {
+            use instant_acme::OrderStatus::*;
+            match order.state().status {
+                Ready | Valid => {
+                    // Ready for issueing certificate
+                    break;
+                }
+                Processing => {
+                    // Wait processing, then continue
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    break;
+                }
+                Pending => {
+                    // Wait for validation complete, retry checking
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+                _ => {
+                    // Unexpected invalid status
+                    return Err(Error::AcmeChallengeIncomplete);
+                }
             }
         }
 

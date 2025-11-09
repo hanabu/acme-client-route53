@@ -28,12 +28,13 @@ impl<'a> AcmeOrderBuilder<'a> {
         let csr = crate::csr::X509Csr::from_pem_file(self.cert_cfg.csr_file_name())?;
 
         for hostname in csr.subjects() {
-            let canonical_host = self.config.canonical_host(hostname);
-            let zone = dns_zones.find_zone(canonical_host);
+            let challenge_record = format!("_acme-challenge.{}", hostname);
+            let canonical_challenge_record = self.config.canonical_host(&challenge_record);
+            let zone = dns_zones.find_zone(canonical_challenge_record);
             if let Some(_zone) = zone {
                 // ok
             } else {
-                return Err(Error::NoDnsZone(canonical_host.to_string()));
+                return Err(Error::NoDnsZone(canonical_challenge_record.to_string()));
             }
         }
 

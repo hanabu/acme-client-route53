@@ -288,7 +288,7 @@ impl DnsChange<'_> {
     pub async fn wait_for_propergation(&self, timeout_secs: u32) -> Result<bool, Error> {
         const POLLING_INTERVAL_SECS: u32 = 10;
 
-        let resolver = hickory_resolver::AsyncResolver::tokio_from_system_conf()?;
+        let resolver = hickory_resolver::Resolver::builder_tokio()?.build();
 
         let timeout = std::time::Duration::from_secs(timeout_secs as u64);
         let wait_start = std::time::Instant::now();

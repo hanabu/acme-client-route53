@@ -21,17 +21,17 @@ pub async fn new_account(
         .map(|c| c.as_str())
         .collect::<Vec<&str>>();
 
-    let (account, cred) = instant_acme::Account::create_with_http(
-        &instant_acme::NewAccount {
-            contact: &contacts_str,
-            terms_of_service_agreed: true,
-            only_return_existing: false,
-        },
-        endpoint,
-        None,
-        crate::http_client::HyperTlsClient::new_boxed(),
-    )
-    .await?;
+    let (account, cred) = instant_acme::Account::builder()?
+        .create(
+            &instant_acme::NewAccount {
+                contact: &contacts_str,
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            endpoint.to_string(),
+            None,
+        )
+        .await?;
 
     println!("Account created: {:?}", serde_json::to_string_pretty(&cred));
 

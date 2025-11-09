@@ -62,11 +62,9 @@ impl Config {
         } = toml::from_str::<ConfigToml>(cfg_toml_str)?;
 
         // Load Account from credentials
-        let account = instant_acme::Account::from_credentials_and_http(
-            credential,
-            crate::http_client::HyperTlsClient::new_boxed(),
-        )
-        .await?;
+        let account = instant_acme::Account::builder()?
+            .from_credentials(credential)
+            .await?;
 
         Ok(Self {
             account,

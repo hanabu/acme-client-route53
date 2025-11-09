@@ -1,6 +1,6 @@
 [package]
 name = "acme-client-route53"
-version = "0.1.0"
+version = "0.2.0-alpha1"
 authors = ["Hanabusa Masahiro"]
 edition = "2021"
 description = "A simple ACME client using AWS Route53 or Lightsail DNS"
@@ -21,7 +21,7 @@ lambda = ["dep:lambda_runtime", "dep:serde_json"]
 rustls = ["instant-acme/hyper-rustls"]
 
 [lib]
-path = "src/lib.rs" 
+path = "src/lib.rs"
 
 # Binary running on localhost
 [[bin]]
@@ -35,24 +35,22 @@ path = "src/bin/lambda-bootstrap.rs"
 required-features = ["lambda"]
 
 [dependencies]
-aws-config = { version="1", default-features=false, features=["behavior-version-latest", "rt-tokio"] }
-aws-smithy-runtime = { version="1", default-features=false, features=["client", "connector-hyper-0-14-x"] }
+aws-config = { version="1", default-features=false, features=["behavior-version-latest", "rt-tokio", "default-https-client"] }
+aws-smithy-runtime = { version="1", default-features=false, features=["client"] }
 aws-sdk-lightsail = { version="1", default-features=false }
 aws-sdk-route53 = { version="1", default-features=false }
 aws-sdk-s3 = { version="1", default-features=false }
-base64 = "0.21"
+base64 = "0.22"
 clap = { version="4", default-features=false, features=["std","derive","help","usage"]}
 futures = { version="0.3" }
-hickory-resolver = { version="0.24", features=["system-config", "tokio-runtime"] }
-hyper = { version="0.14", features=["client","http1"] }
-hyper-tls = { version="0.5" }
-instant-acme = { version="0.4.1", default-features=false }
-# Update to >=0.9, after aws-sdk and instant-acme will migrate to hyper-v1
-lambda_runtime = { version="0.8", optional=true }
+hickory-resolver = { version="0.25", features=["system-config", "tokio"] }
+hyper = { version="1", features=["client","http1"] }
+instant-acme = { version="0.8" }
+lambda_runtime = { version="0.14", optional=true }
 serde = { version="1", features=["derive"] }
 serde_json = { version="1", optional=true }
-thiserror = "1"
-toml = "0.8"
+thiserror = "2"
+toml = "0.9"
 tokio = { version="1", default-features=false, features=["macros", "rt-multi-thread"] }
 url = "2"
-x509-parser = { version="0.15" }
+x509-parser = { version="0.18" }

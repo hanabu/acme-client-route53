@@ -73,13 +73,15 @@ pub enum Error {
         #[from] aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::put_object::PutObjectError>,
     ),
     #[error(transparent)]
-    DnsResolveError(#[from] hickory_resolver::error::ResolveError),
+    DnsResolveError(#[from] hickory_resolver::ResolveError),
     #[error("Configuration file already exists")]
     ConfigExists,
     #[error("No DNS zone for {0}")]
     NoDnsZone(String),
     #[error("DNS01 challenge is not supported")]
     DnsChallengeNotSupported,
+    #[error("Order must be DNS name")]
+    InvalidAcmeOrder,
     #[error("ACME challenge did not complete unexpectedly")]
     AcmeChallengeIncomplete,
     #[error("DNS update timeout")]

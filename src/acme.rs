@@ -58,86 +58,72 @@ impl AcmeOrder<'_> {
         let mut order = self
             .config
             .account()
-            .new_order(&instant_acme::NewOrder {
-                identifiers: &validate_hostnames,
-            })
+            .new_order(&instant_acme::NewOrder::new(&validate_hostnames))
             .await?;
 
-        let authorizations = order.authorizations().await?;
+        let mut authorizations = order.authorizations();
 
-        // Collect ACME challenges need to be verified
-        let challenges = authorizations
-            .iter()
-            .filter_map(|auth| {
-                use instant_acme::AuthorizationStatus::Pending;
-                use instant_acme::ChallengeType::Dns01;
-                match auth.status {
-                    Pending => {
-                        // challenge & authorize
-                        let dns_challenge = auth.challenges.iter().find(|c| c.r#type == Dns01);
-                        if let Some(dns_challenge) = dns_challenge {
-                            // DNS01 challenge
-                            let hostname = match &auth.identifier {
-                                instant_acme::Identifier::Dns(hostname) => hostname.as_str(),
-                            };
+        // Collect ACME challenges need to be verified, and register DNS records
+        while let Some(Ok(mut auth)) = authorizations.next().await {
+            use instant_acme::AuthorizationStatus::Pending;
+            use instant_acme::ChallengeType::Dns01;
+            match auth.status {
+                Pending => {
+                    // challenge & authorize
+                    if let Some(mut dns_challenge) = auth.challenge(Dns01) {
+                        // DNS01 challenge
+                        if let instant_acme::Identifier::Dns(hostname) =
+                            dns_challenge.identifier().identifier
+                        {
                             // Retrive TXT record value
-                            let key_auth = order.key_authorization(dns_challenge);
-                            Some(Ok((
-                                hostname,
-                                key_auth.dns_value(),
-                                dns_challenge.url.as_str(),
-                            )))
+                            let key_auth = dns_challenge.key_authorization();
+
+                            let challenge_record = format!("_acme-challenge.{}", hostname);
+                            let canonical_challenge_record =
+                                self.config.canonical_host(&challenge_record);
+
+                            dns_zones
+                                .update_txt_record(
+                                    canonical_challenge_record,
+                                    &key_auth.dns_value(),
+                                )
+                                .await?
+                                .wait_for_propergation(90)
+                                .await?;
+
+                            // DNS change has been propergated. Let ACME server to validate them.
+                            dns_challenge.set_ready().await?;
                         } else {
-                            // Oops, No DNS challenge supported in the ACME server?
-                            Some(Err(Error::DnsChallengeNotSupported))
+                            return Err(Error::InvalidAcmeOrder);
                         }
-                    }
-                    // Valid, Invalid, Revoked, Expired
-                    _ => None,
+                    } else {
+                        // Oops, No DNS challenge supported in the ACME server?
+                        return Err(Error::DnsChallengeNotSupported);
+                    };
                 }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        for (hostname, txt_value, challenge_url) in challenges {
-            let challenge_record = format!("_acme-challenge.{}", hostname);
-            let canonical_challenge_record = self.config.canonical_host(&challenge_record);
-
-            dns_zones
-                .update_txt_record(canonical_challenge_record, &txt_value)
-                .await?
-                .wait_for_propergation(90)
-                .await?;
-
-            // DNS change has been propergated. Let ACME server to validate them.
-            order.set_challenge_ready(challenge_url).await?;
+                // Valid, Invalid, Revoked, Expired
+                _ => {}
+            };
         }
 
         // Now, all challenge has validated.
-        for _retry in 0..3 {
-            use instant_acme::OrderStatus::*;
-            match order.state().status {
-                Ready | Valid => {
-                    // Ready for issueing certificate
-                    break;
-                }
-                Processing => {
-                    // Wait processing, then continue
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    break;
-                }
-                Pending => {
-                    // Wait for validation complete, retry checking
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                }
-                _ => {
-                    // Unexpected invalid status
-                    return Err(Error::AcmeChallengeIncomplete);
-                }
+        let order_state = order
+            .poll_ready(
+                &instant_acme::RetryPolicy::new().timeout(std::time::Duration::from_secs(15)),
+            )
+            .await?;
+        match order_state {
+            instant_acme::OrderStatus::Ready | instant_acme::OrderStatus::Valid => {
+                // Ready for issueing certificate
+            }
+            _ => {
+                // Unexpected invalid status
+                return Err(Error::AcmeChallengeIncomplete);
             }
         }
 
         // Issue certificate
-        order.finalize(self.csr.der_bytes()).await?;
+        order.finalize_csr(self.csr.der_bytes()).await?;
         for _retry in 0..12 {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             if let Some(crt_pem_str) = order.certificate().await? {

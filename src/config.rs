@@ -10,8 +10,12 @@ pub struct Config {
 
 #[derive(Clone, serde::Deserialize)]
 pub struct CertReqConfig {
+    /// Certificate signing request filename (as input file)
     csr_file: String,
+    /// Issued server certificate filename (as output file)
     out_crt_file: String,
+    /// Issuer (CA) intermidiate certificate filename (as output file)
+    out_iss_file: Option<String>,
     #[serde(flatten)]
     extra: std::collections::HashMap<String, toml::Value>,
 }
@@ -91,12 +95,19 @@ impl Config {
 }
 
 impl CertReqConfig {
+    /// File name of input CSR (certificate signing request)
     pub fn csr_file_name<'a>(&'a self) -> &'a str {
         self.csr_file.as_str()
     }
 
+    /// File name (or S3 URL) of issued server certificate
     pub fn crt_file_name<'a>(&'a self) -> &'a str {
         &self.out_crt_file.as_str()
+    }
+
+    /// File name (or S3 URL) of issuer (CA intermidiate) certificate
+    pub fn iss_file_name<'a>(&'a self) -> Option<&'a str> {
+        self.out_iss_file.as_deref()
     }
 
     pub fn extra_config<'de, T: serde::Deserialize<'de>>(self) -> Result<T, Error> {

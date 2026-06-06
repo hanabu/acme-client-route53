@@ -2,19 +2,17 @@ use crate::Error;
 
 pub async fn write_crt(
     crt_file_name: &str,
-    certificate: &crate::AcmeIssuedCertificate,
+    certificate_pem: String,
     aws_sdk_config: &aws_config::SdkConfig,
 ) -> Result<(), Error> {
-    let crt_bytes = certificate.server_certificate_pem().into_bytes();
-
     if let Ok(url) = url::Url::parse(crt_file_name) {
         if url.scheme() == "s3" {
-            write_crt_s3(&url, crt_bytes, aws_sdk_config).await
+            write_crt_s3(&url, certificate_pem.into_bytes(), aws_sdk_config).await
         } else {
             Err(Error::InvalidOutCrtFile(crt_file_name.to_string()))
         }
     } else {
-        write_crt_localfile(crt_file_name, &crt_bytes)
+        write_crt_localfile(crt_file_name, certificate_pem.as_bytes())
     }
 }
 

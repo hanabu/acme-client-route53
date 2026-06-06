@@ -111,8 +111,15 @@ pub async fn issue_certificates(config: &Config) -> Result<(), Error> {
         // Request certificate to ACME server
         let certificate = order.request_certificate(&zones).await?;
 
-        // Save certificate
-        write_crt(crt_req.crt_file_name(), &certificate, &aws_sdk_config).await?;
+        // Save server certificate
+        let server_crt_pem = certificate.server_certificate_pem();
+        write_crt(crt_req.crt_file_name(), server_crt_pem, &aws_sdk_config).await?;
+
+        if let Some(iss_file_name) = crt_req.iss_file_name() {
+            // Save issuer certificate (CA intermidiate)
+            let issuer_crt_pem = certificate.issuer_certificate_pem();
+            write_crt(iss_file_name, issuer_crt_pem, &aws_sdk_config).await?;
+        }
 
         Result::<(), Error>::Ok(())
     });

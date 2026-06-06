@@ -1,10 +1,10 @@
 [package]
 name = "acme-client-route53"
-version = "0.2.0-alpha1"
+version = "0.2.0-beta1"
 authors = ["Hanabusa Masahiro"]
 edition = "2021"
 description = "A simple ACME client using AWS Route53 or Lightsail DNS"
-rust-version = "1.69.0"
+rust-version = "1.84.0"
 readme = "README.md"
 repository = "https://github.com/hanabu/acme-client-route53"
 license = "MIT"
@@ -46,11 +46,11 @@ futures = { version="0.3" }
 hickory-resolver = { version="0.25", features=["system-config", "tokio"] }
 hyper = { version="1", features=["client","http1"] }
 instant-acme = { version="0.8" }
-lambda_runtime = { version="0.14", optional=true }
+lambda_runtime = { version="1", optional=true }
 serde = { version="1", features=["derive"] }
 serde_json = { version="1", optional=true }
 thiserror = "2"
-toml = "0.9"
+toml = "1"
 tokio = { version="1", default-features=false, features=["macros", "rt-multi-thread"] }
 url = "2"
 x509-parser = { version="0.18" }

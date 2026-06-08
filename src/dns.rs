@@ -28,11 +28,26 @@ impl AllDnsZones {
         let route53_fut = Self::list_route53_zones(&aws_clinet.route53_client);
 
         // concurrent execution of lightsail and route53
-        let (lightsail_zones, route53_zones) = futures::try_join!(lightsail_fut, route53_fut)?;
+        let (lightsail_zones, route53_zones) = futures::join!(lightsail_fut, route53_fut);
+
+        // Continue processing even if an error occurs.
+        // It's sufficient if either Lightsail or Route53 succeeds.
+        let lightsail_zones = lightsail_zones
+            .inspect_err(|e| log::warn!("{:?}", e))
+            .unwrap_or_default();
+        let route53_zones = route53_zones
+            .inspect_err(|e| log::warn!("{:?}", e))
+            .unwrap_or_default();
 
         // Concat Lightsail DNS + Route53 zones
         let mut all_zones = lightsail_zones;
         all_zones.extend(route53_zones);
+
+        if log::log_enabled!(log::Level::Debug) {
+            for zone in &all_zones {
+                log::debug!("Zone: {}", zone.domain_name());
+            }
+        }
 
         Ok(Self {
             dns_zones: all_zones,
@@ -45,6 +60,7 @@ impl AllDnsZones {
             .iter()
             .filter(|zone| zone.contains(hostname))
             .max_by_key(|zone| zone.domain_name().len())
+            .inspect(|zone| log::debug!("{} is in {}", hostname, zone.domain_name()))
     }
 
     pub async fn update_txt_record<'a: 'c, 'b: 'c, 'c>(
@@ -57,6 +73,11 @@ impl AllDnsZones {
                 domain_name,
                 txt_record_ids,
             }) => {
+                log::info!(
+                    "Updating Lightsail TXT record {}.{}",
+                    record_name,
+                    domain_name
+                );
                 let initial_wait = DnsZone::update_txt_lightsail(
                     &self.aws_client.lightsail_client,
                     domain_name.as_str(),
@@ -65,6 +86,7 @@ impl AllDnsZones {
                     txt_value,
                 )
                 .await?;
+                log::info!("{}.{} was updated.", record_name, domain_name);
 
                 Ok(DnsChange {
                     record_name,
@@ -73,9 +95,14 @@ impl AllDnsZones {
                 })
             }
             Some(DnsZone::Route53 {
-                domain_name: _,
+                domain_name,
                 hosted_zone_id,
             }) => {
+                log::info!(
+                    "Updating Route53 TXT record {}.{}",
+                    record_name,
+                    domain_name
+                );
                 let initial_wait = DnsZone::update_txt_route53(
                     &self.aws_client.route53_client,
                     hosted_zone_id.as_str(),
@@ -83,6 +110,8 @@ impl AllDnsZones {
                     txt_value,
                 )
                 .await?;
+                log::info!("{}.{} was updated.", record_name, domain_name);
+
                 Ok(DnsChange {
                     record_name,
                     txt_value,

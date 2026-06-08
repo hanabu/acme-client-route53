@@ -7,11 +7,13 @@ pub async fn write_crt(
 ) -> Result<(), Error> {
     if let Ok(url) = url::Url::parse(crt_file_name) {
         if url.scheme() == "s3" {
+            log::debug!("Write certificate to S3 {}", crt_file_name);
             write_crt_s3(&url, certificate_pem.into_bytes(), aws_sdk_config).await
         } else {
             Err(Error::InvalidOutCrtFile(crt_file_name.to_string()))
         }
     } else {
+        log::debug!("Write certificate to local file {}", crt_file_name);
         write_crt_localfile(crt_file_name, certificate_pem.as_bytes())
     }
 }

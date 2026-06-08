@@ -30,6 +30,12 @@ impl<'a> AcmeOrderBuilder<'a> {
         for hostname in csr.subjects() {
             let challenge_record = format!("_acme-challenge.{}", hostname);
             let canonical_challenge_record = self.config.canonical_host(&challenge_record);
+            log::debug!(
+                "ACME DNS01 challenge record will be {} for host {}",
+                canonical_challenge_record,
+                hostname
+            );
+
             let zone = dns_zones.find_zone(canonical_challenge_record);
             if let Some(_zone) = zone {
                 // ok
@@ -53,6 +59,7 @@ impl AcmeOrder<'_> {
         let validate_hostnames = self
             .csr
             .subjects()
+            .inspect(|hostname| log::debug!("Hostname to be validated: {}", hostname))
             .map(|hostname| instant_acme::Identifier::Dns(hostname.to_string()))
             .collect::<Vec<_>>();
 
@@ -83,6 +90,12 @@ impl AcmeOrder<'_> {
                             let canonical_challenge_record =
                                 self.config.canonical_host(&challenge_record);
 
+                            log::debug!(
+                                "DNS01 challenge record: {} -> {}",
+                                challenge_record,
+                                canonical_challenge_record
+                            );
+
                             dns_zones
                                 .update_txt_record(
                                     canonical_challenge_record,
@@ -106,6 +119,7 @@ impl AcmeOrder<'_> {
                 _ => {}
             };
         }
+        log::info!("All hostnames are validated");
 
         // Now, all challenge has validated.
         let order_state = order
@@ -113,6 +127,8 @@ impl AcmeOrder<'_> {
                 &instant_acme::RetryPolicy::new().timeout(std::time::Duration::from_secs(15)),
             )
             .await?;
+        log::info!("ACME order is ready");
+
         match order_state {
             instant_acme::OrderStatus::Ready | instant_acme::OrderStatus::Valid => {
                 // Ready for issueing certificate
@@ -128,6 +144,7 @@ impl AcmeOrder<'_> {
         for _retry in 0..12 {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             if let Some(crt_pem_str) = order.certificate().await? {
+                log::info!("Certificate is issued");
                 let crt_pem = x509_parser::pem::Pem::iter_from_buffer(crt_pem_str.as_bytes())
                     .collect::<Result<Vec<_>, x509_parser::error::PEMError>>()?;
 

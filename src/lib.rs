@@ -1,9 +1,9 @@
 mod account;
 mod acme;
+mod aws_config;
 mod config;
 mod csr;
 mod dns;
-mod http_client;
 mod output;
 
 // re-exports
@@ -97,7 +97,7 @@ pub async fn issue_certificates(config: &Config) -> Result<(), Error> {
     const REQUEST_CONCURRENT: usize = 4;
 
     // Default region config for S3 put
-    let aws_sdk_config = http_client::aws_config_from_env(None).await;
+    let aws_sdk_config = aws_config::aws_config_from_env(None).await;
 
     // Load DNS records that current AWS credential can manage
     let aws_client = AwsClient::new().await;

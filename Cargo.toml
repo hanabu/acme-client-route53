@@ -36,10 +36,9 @@ required-features = ["lambda"]
 
 [dependencies]
 aws-config = { version="1", default-features=false, features=["behavior-version-latest", "rt-tokio", "default-https-client"] }
-aws-smithy-runtime = { version="1", default-features=false, features=["client"] }
-aws-sdk-lightsail = { version="1", default-features=false }
-aws-sdk-route53 = { version="1", default-features=false }
-aws-sdk-s3 = { version="1", default-features=false }
+aws-sdk-lightsail = "1"
+aws-sdk-route53 = "1"
+aws-sdk-s3 = "1"
 base64 = "0.22"
 clap = { version="4", default-features=false, features=["std","derive","help","usage"]}
 futures = { version="0.3" }
